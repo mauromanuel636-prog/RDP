@@ -1,0 +1,38 @@
+name: RDP Windows
+on: workflow_dispatch
+
+jobs:
+  rdp:
+    runs-on: windows-2025
+    timeout-minutes: 360
+    steps:
+      - name: Habilitar RDP
+        shell: powershell
+        env:
+          RDP_PASS: ${{ secrets.RDP_PASS }}
+        run: |
+          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name fDenyTSConnections -Value 0
+          Enable-NetFirewallRule -DisplayGroup "Remote Desktop"
+          Set-LocalUser -Name "runneradmin" -Password (ConvertTo-SecureString $env:RDP_PASS -AsPlainText -Force)
+
+      - name: Instalar programas (Chocolatey)
+        continue-on-error: true
+        shell: powershell
+        run: |
+          choco install -y --no-progress steam-client libreoffice-fresh retroarch ppsspp pcsx2
+
+      - name: Instalar Packet Tracer
+        continue-on-error: true
+        shell: powershell
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release download instaladores -p "PacketTracer.exe" -D C:\inst --repo ${{ github.repository }}
+          Start-Process C:\inst\PacketTracer.exe -ArgumentList "/VERYSILENT","/SUPPRESSMSGBOXES","/NORESTART" -Wait
+
+      - name: Túnel bore
+        shell: powershell
+        run: |
+          Invoke-WebRequest -Uri "https://github.com/ekzhang/bore/releases/download/v0.5.2/bore-v0.5.2-x86_64-pc-windows-msvc.zip" -OutFile bore.zip
+          Expand-Archive bore.zip -DestinationPath .
+          ./bore.exe local 3389 --to bore.pub
