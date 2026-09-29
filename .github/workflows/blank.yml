@@ -1,38 +1,55 @@
-name: RDP Windows
+name: 1 - Instalar
 on: workflow_dispatch
+permissions:
+  contents: write
 
 jobs:
-  rdp:
+  instalar:
     runs-on: windows-2025
     timeout-minutes: 360
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
       - name: Habilitar RDP
-        shell: powershell
+        shell: pwsh
         env:
           RDP_PASS: ${{ secrets.RDP_PASS }}
         run: |
-          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name fDenyTSConnections -Value 0
+          Set-ItemProperty 'HKLM:\System\CurrentControlSet\Control\Terminal Server' fDenyTSConnections 0
           Enable-NetFirewallRule -DisplayGroup "Remote Desktop"
-          Set-LocalUser -Name "runneradmin" -Password (ConvertTo-SecureString $env:RDP_PASS -AsPlainText -Force)
+          Set-LocalUser runneradmin -Password (ConvertTo-SecureString $env:RDP_PASS -AsPlainText -Force)
 
-      - name: Instalar programas (Chocolatey)
+      - name: Instalar programas
         continue-on-error: true
-        shell: powershell
-        run: |
-          choco install -y --no-progress steam-client libreoffice-fresh retroarch ppsspp pcsx2
+        shell: pwsh
+        run: choco install -y --no-progress steam-client libreoffice-fresh retroarch ppsspp pcsx2
 
       - name: Instalar Packet Tracer
         continue-on-error: true
-        shell: powershell
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: pwsh
         run: |
           gh release download instaladores -p "PacketTracer.exe" -D C:\inst --repo ${{ github.repository }}
           Start-Process C:\inst\PacketTracer.exe -ArgumentList "/VERYSILENT","/SUPPRESSMSGBOXES","/NORESTART" -Wait
 
-      - name: Túnel bore
-        shell: powershell
+      - name: Sessão RDP
+        timeout-minutes: 340
+        continue-on-error: true
+        shell: pwsh
         run: |
-          Invoke-WebRequest -Uri "https://github.com/ekzhang/bore/releases/download/v0.5.2/bore-v0.5.2-x86_64-pc-windows-msvc.zip" -OutFile bore.zip
+          New-Item C:\dados -ItemType Directory -Force | Out-Null
+          Set-Content C:\Users\Public\Desktop\SALVAR-E-ENCERRAR.bat "echo ok > C:\stop.txt"
+          Invoke-WebRequest "https://github.com/ekzhang/bore/releases/download/v0.5.2/bore-v0.5.2-x86_64-pc-windows-msvc.zip" -OutFile bore.zip
           Expand-Archive bore.zip -DestinationPath .
-          ./bore.exe local 3389 --to bore.pub
+          Start-Process ./bore.exe -ArgumentList "local 3389 --to bore.pub" -RedirectStandardOutput bore.log -RedirectStandardError bore.err -NoNewWindow
+          Start-Sleep 15
+          Get-Content bore.log, bore.err
+          while (-not (Test-Path C:\stop.txt)) { Start-Sleep 10 }
+
+      - name: Devolver backup
+        if: always()
+        shell: pwsh
+        run: |
+          Set-Location C:\
+          7z a -tzip -mx=1 backup.zip Users\runneradmin\Desktop Users\runneradmin\Documents Users\runneradmin\AppData\Roaming dados
+          gh release view dados --repo ${{ github.repository }} 2>$null || gh release create dados --repo ${{ github.repository }} --notes backup
+          gh release upload dados C:\backup.zip --clobber --repo ${{ github.repository }}
